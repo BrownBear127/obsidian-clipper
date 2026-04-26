@@ -47,20 +47,25 @@ export interface TranslatorConfig {
 	timeoutMs: number;
 }
 
+/** Build the default system prompt for a given target language. */
+export function buildDefaultSystemPrompt(targetLang: string): string {
+	return [
+		`You are a professional translator. Translate the user's multi-paragraph text into ${targetLang}.`,
+		'Rules:',
+		'1. Input has multiple paragraphs separated by "<<<SEG>>>". Output MUST preserve the same paragraph count, separated by "<<<SEG>>>" (verbatim).',
+		'2. Output only translated text + separators. No preamble, no markdown wrapper, no numbering, no commentary.',
+		'3. Preserve original punctuation and line-break rhythm.',
+		'4. Keep proper nouns, code, URLs, numbers, person names, place names as-is.',
+		`5. If a paragraph is already in ${targetLang}, output it unchanged.`,
+		'6. **Never translate the "<<<SEG>>>" marker** — keep it verbatim.',
+	].join('\n');
+}
+
 export const DEFAULT_TRANSLATOR_CONFIG: TranslatorConfig = {
 	endpoint: 'http://127.0.0.1:8843/v1/chat/completions',
 	model: 'qwen3-4b-translator',
 	targetLang: '繁體中文（台灣）',
-	systemPrompt: [
-		'你是專業翻譯助手。將使用者提供的多段文本翻譯成繁體中文（台灣慣用語）。',
-		'規則：',
-		'1. 輸入有多段，段落之間以 "<<<SEG>>>" 分隔。**輸出必須保持相同段數**，每段之間以 "<<<SEG>>>" 分隔（一字不差）。',
-		'2. 只輸出翻譯本文 + 分隔符，不要前後說明、不要 markdown wrapper、不要編號。',
-		'3. 保留原文的標點與換行節奏。',
-		'4. 專有名詞、code、URL、數字、人名、地名保持原樣不譯。',
-		'5. 已是繁體中文的段落原樣輸出。',
-		'6. **絕對不要把 "<<<SEG>>>" 翻譯成其他文字**，原樣保留。',
-	].join('\n'),
+	systemPrompt: buildDefaultSystemPrompt('繁體中文（台灣）'),
 	timeoutMs: 60000,
 };
 
@@ -76,9 +81,13 @@ const WRITE_DEBOUNCE = 5;
 async function loadCacheFromStorage(): Promise<void> {
 	if (storageLoaded) return;
 	storageLoaded = true;
+	const s = storageLocal();
+	if (!s) {
+		console.warn('[Translator] storage.local unavailable — running with in-memory cache only');
+		return;
+	}
 	try {
-		const r = rt();
-		const data = await r.storage?.local?.get?.(CACHE_STORAGE_KEY);
+		const data = await s.get(CACHE_STORAGE_KEY);
 		const stored = (data && data[CACHE_STORAGE_KEY]) || {};
 		for (const [k, v] of Object.entries(stored)) {
 			if (typeof v === 'string') cache.set(k, v);
@@ -93,17 +102,21 @@ function scheduleCachePersist(force = false): void {
 	writesSinceSync++;
 	if (!force && writesSinceSync < WRITE_DEBOUNCE) return;
 	writesSinceSync = 0;
-	// Trim LRU (front of Map = oldest)
 	while (cache.size > MAX_CACHE_ENTRIES) {
 		const firstKey = cache.keys().next().value;
 		if (firstKey === undefined) break;
 		cache.delete(firstKey);
 	}
+	const s = storageLocal();
+	if (!s) return;
 	try {
-		const r = rt();
-		r.storage?.local?.set?.({ [CACHE_STORAGE_KEY]: Object.fromEntries(cache) });
-	} catch {
-		// non-extension context (e.g. dev/test) — silently no-op
+		const p = s.set({ [CACHE_STORAGE_KEY]: Object.fromEntries(cache) });
+		// chrome.* returns undefined; browser.* returns Promise. Catch either.
+		if (p && typeof p.catch === 'function') {
+			p.catch((err: unknown) => console.warn('[Translator] cache persist failed:', err));
+		}
+	} catch (err) {
+		console.warn('[Translator] cache persist failed sync:', err);
 	}
 }
 
@@ -117,7 +130,9 @@ async function sha256(input: string): Promise<string> {
 
 async function cacheKey(text: string, cfg: TranslatorConfig | string): Promise<string> {
 	if (typeof cfg === 'string') return `${cfg}::${await sha256(text)}`;
-	const sig = `${cfg.targetLang}::${cfg.model}::${cfg.endpoint}::${cfg.systemPrompt.length}`;
+	// Hash the full prompt — same length but different content must NOT collide
+	const promptHash = (await sha256(cfg.systemPrompt)).slice(0, 12);
+	const sig = `${cfg.targetLang}::${cfg.model}::${cfg.endpoint}::${promptHash}`;
 	return `${sig}::${await sha256(text)}`;
 }
 
@@ -127,6 +142,15 @@ declare const chrome: any;
 function rt(): any {
 	try { return (typeof browser !== 'undefined' && browser?.runtime) ? browser.runtime : chrome.runtime; }
 	catch { return chrome.runtime; }
+}
+function storageLocal(): any {
+	try {
+		if (typeof browser !== 'undefined' && browser?.storage?.local) return browser.storage.local;
+	} catch {}
+	try {
+		if (typeof chrome !== 'undefined' && chrome?.storage?.local) return chrome.storage.local;
+	} catch {}
+	return null;
 }
 
 async function translateBatch(
@@ -245,7 +269,9 @@ export async function translateTexts(
 export function clearTranslationCacheStorage(): void {
 	cache.clear();
 	storageLoaded = false;
-	try { rt().storage?.local?.remove?.(CACHE_STORAGE_KEY); } catch {}
+	const s = storageLocal();
+	if (!s) return;
+	try { s.remove(CACHE_STORAGE_KEY); } catch {}
 }
 
 /**

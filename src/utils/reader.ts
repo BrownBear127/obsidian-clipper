@@ -31,7 +31,7 @@ import { saveFile } from './file-utils';
 import { parseForClip } from './clip-utils';
 import { updateSidebarWidth, addResizeHandle, cleanupResizeHandlers } from './iframe-resize';
 import { setElementHTML, setSVGChildren, serializeChildren } from './dom-utils';
-import { applyTranslationState, DEFAULT_TRANSLATOR_CONFIG, type ReaderTranslateState } from './translator';
+import { applyTranslationState, DEFAULT_TRANSLATOR_CONFIG, buildDefaultSystemPrompt, type ReaderTranslateState } from './translator';
 
 // Mobile viewport settings
 const VIEWPORT = 'width=device-width, initial-scale=1, maximum-scale=1';
@@ -2275,6 +2275,10 @@ export class Reader {
 
 			this.populateArticle(doc, main, article, { content, title, author, published, domain, wordCount, parseTime });
 
+			// Capture pristine snapshot for save restore. Important: do this BEFORE
+			// any reader-decoration mutations get a chance to dirty the article.
+			this.captureCleanArticleSnapshot(doc);
+
 			// Auto-trigger translation:
 			//  - if user previously toggled state on this session, OR
 			//  - if translatorEnabled setting is true (auto-on per page open)
@@ -2607,6 +2611,9 @@ export class Reader {
 		if (s.translatorTargetLang) cfg.targetLang = s.translatorTargetLang;
 		if (s.translatorSystemPrompt && s.translatorSystemPrompt.trim()) {
 			cfg.systemPrompt = s.translatorSystemPrompt;
+		} else {
+			// Inject targetLang into default prompt so changing language actually works
+			cfg.systemPrompt = buildDefaultSystemPrompt(cfg.targetLang);
 		}
 		return cfg;
 	}
@@ -2970,30 +2977,62 @@ export class Reader {
 	 * Mutates `doc` in place; caller should restore afterwards via reverseSaveTransform.
 	 */
 	/**
+	 * Pristine article snapshot taken right after populateArticle(). We use this
+	 * as the canonical clean source to restore on translateState='off' so we
+	 * never persist reader-decoration mutations (highlight buttons, comment
+	 * widgets, code-copy buttons, …) into vault save.
+	 */
+	private static cleanArticleHtml: string | null = null;
+	private static cleanArticleAttr: string | null = null;
+
+	private static captureCleanArticleSnapshot(doc: Document): void {
+		const article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;
+		if (!article) return;
+		const clone = article.cloneNode(true) as HTMLElement;
+		clone.querySelectorAll('span.timestamp').forEach(span => {
+			span.replaceWith(span.textContent || '');
+		});
+		this.cleanArticleHtml = serializeChildren(clone);
+		this.cleanArticleAttr = article.getAttribute('data-original-html');
+	}
+
+	/**
 	 * Idempotent: write a save-friendly serialization into article's
 	 * data-original-html (which parseForClip prefers over live DOM). Safe to
-	 * call repeatedly — does not mutate live DOM at all. Used by:
-	 *   - reader-internal Save/Copy (reader-side dropdown)
-	 *   - Obsidian iframe popup save (via window global hook)
+	 * call repeatedly — does not mutate live DOM at all.
+	 *
+	 * - off: restore the pristine snapshot captured right after populateArticle
+	 * - target_only: serialize live DOM (translation has replaced text in place)
+	 * - bilingual: clone live DOM, wrap paragraph-like nodes in blockquote
 	 */
 	static syncSaveSnapshot(doc: Document): void {
 		const article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;
 		if (!article) return;
 
-		// Build a clone we can mutate without touching live DOM
+		if (this.translateState === 'off') {
+			if (this.cleanArticleHtml !== null) {
+				article.setAttribute('data-original-html', this.cleanArticleHtml);
+			} else if (this.cleanArticleAttr !== null) {
+				article.setAttribute('data-original-html', this.cleanArticleAttr);
+			}
+			return;
+		}
+
 		const clone = article.cloneNode(true) as HTMLElement;
 		clone.querySelectorAll('span.timestamp').forEach(span => {
 			span.replaceWith(span.textContent || '');
 		});
 
 		if (this.translateState === 'bilingual') {
-			// Wrap each original paragraph in a blockquote so saved markdown reads:
-			//   > 原文
-			//
-			//   繁中
+			// Only wrap "paragraph-like" blocks. Headings, list items, dt/dd,
+			// figcaption are kept inline (they live inside heavier structures
+			// where blockquote injection would break list/dl markdown).
+			const WRAPPABLE = new Set(['P', 'BLOCKQUOTE']);
 			const originals = Array.from(clone.querySelectorAll('[data-ot-original]')) as HTMLElement[];
 			for (const orig of originals) {
+				if (!WRAPPABLE.has(orig.tagName)) continue;
 				if (orig.parentElement?.classList.contains('ot-save-quote')) continue;
+				if (orig.closest('li, dt, dd, figcaption')) continue;
 				const bq = doc.createElement('blockquote');
 				bq.className = 'ot-save-quote';
 				const parent = orig.parentNode;
@@ -3001,7 +3040,6 @@ export class Reader {
 				bq.appendChild(orig);
 			}
 		}
-		// 'target_only' / 'off': clone already mirrors live DOM; nothing to wrap.
 
 		article.setAttribute('data-original-html', serializeChildren(clone));
 	}
