@@ -56,8 +56,9 @@ export function buildDefaultSystemPrompt(targetLang: string): string {
 		'2. Output only translated text + separators. No preamble, no markdown wrapper, no numbering, no commentary.',
 		'3. Preserve original punctuation and line-break rhythm.',
 		'4. Keep proper nouns, code, URLs, numbers, person names, place names as-is.',
-		`5. If a paragraph is already in ${targetLang}, output it unchanged.`,
-		'6. **Never translate the "<<<SEG>>>" marker** — keep it verbatim.',
+		`5. ALWAYS translate non-${targetLang} content (including Japanese, English, Korean, etc). NEVER echo the source verbatim. Short fragments still need translation.`,
+		`6. ONLY skip translation if the paragraph is ALREADY in ${targetLang}; otherwise translate.`,
+		'7. **Never translate the "<<<SEG>>>" marker** — keep it verbatim.',
 	].join('\n');
 }
 
@@ -173,6 +174,27 @@ async function translateBatch(
 	throw new Error(`split mismatch: got ${parts.length}, expected ${texts.length}`);
 }
 
+// Heuristic: detect a paragraph the model didn't actually translate.
+// Catches two common failure modes:
+//   - exact echo (model gave up, returned input verbatim)
+//   - kana echo: target is Chinese but output retains substantial Japanese
+//     kana, meaning the Japanese source went through unchanged.
+function isLikelyUntranslated(source: string, translated: string, targetLang: string): boolean {
+	if (!translated) return true;
+	if (translated.trim() === source.trim()) return true;
+	const wantsChinese = /中文|繁體|繁体|简体|chinese/i.test(targetLang);
+	if (!wantsChinese) return false;
+	const kanaCount = (s: string): number => {
+		const m = s.match(/[぀-ゟ゠-ヿ]/g);
+		return m ? m.length : 0;
+	};
+	const srcKana = kanaCount(source);
+	const dstKana = kanaCount(translated);
+	// Source must contain some kana (so it actually IS Japanese), and output
+	// must still contain a meaningful proportion of kana (didn't strip)
+	return srcKana > 3 && dstKana > Math.max(2, srcKana * 0.4);
+}
+
 /**
  * Robust translator: try batch, on split mismatch retry batch once, then
  * fall back to single-paragraph translations. Original text is kept on
@@ -254,11 +276,27 @@ export async function translateTexts(
 		const slice = need.slice(i, i + BATCH_SIZE);
 		const translations = await translateWithRetry(slice.map(s => s.text), cfg);
 		for (let j = 0; j < slice.length; j++) {
-			const t = translations[j] || slice[j].text; // last-resort: keep original
+			let t = translations[j] || slice[j].text;
+			// Per-segment second-chance: if model echoed the source (or kept
+			// Japanese kana when Chinese was requested), retry single.
+			if (isLikelyUntranslated(slice[j].text, t, cfg.targetLang)) {
+				console.warn('[Translator] segment looks untranslated, single-retry');
+				try {
+					const retry = await translateBatch([slice[j].text], cfg);
+					const r = retry[0];
+					if (r && !isLikelyUntranslated(slice[j].text, r, cfg.targetLang)) {
+						t = r;
+					}
+				} catch (err) {
+					console.warn('[Translator] single-retry failed, keep original:', err);
+				}
+			}
 			out[slice[j].idx] = t;
 			const key = await cacheKey(slice[j].text, cfg);
-			// Only cache when we actually translated (not when we fell back to original)
-			if (t && t !== slice[j].text) cache.set(key, t);
+			// Don't cache if it looks like we kept the original
+			if (t && t !== slice[j].text && !isLikelyUntranslated(slice[j].text, t, cfg.targetLang)) {
+				cache.set(key, t);
+			}
 		}
 	}
 

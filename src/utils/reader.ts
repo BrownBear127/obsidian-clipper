@@ -2191,7 +2191,9 @@ export class Reader {
 			// so we ALSO listen for a DOM-level CustomEvent dispatched by content.ts.
 			(window as any).__otReaderSyncSaveSnapshot = () => Reader.syncSaveSnapshot(doc);
 			doc.addEventListener('ot-presave', () => {
-				try { Reader.syncSaveSnapshot(doc); } catch {}
+				console.log('[Translator] ot-presave received, state=', Reader.translateState);
+				try { Reader.syncSaveSnapshot(doc); console.log('[Translator] snapshot synced'); }
+				catch (err) { console.warn('[Translator] snapshot sync error', err); }
 			});
 
 			// Load the highlighter stylesheet. On a live page (case 2), this

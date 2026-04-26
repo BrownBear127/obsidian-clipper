@@ -59,11 +59,17 @@ declare global {
 		// across the DOM regardless of world.
 		try {
 			const hook = (window as any).__otReaderSyncSaveSnapshot;
-			if (typeof hook === 'function') hook();
-		} catch {}
+			if (typeof hook === 'function') {
+				console.log('[Clipper] presave: calling reader hook');
+				hook();
+			} else {
+				console.log('[Clipper] presave: reader hook not on window (isolated world?)');
+			}
+		} catch (e) { console.warn('[Clipper] presave hook err', e); }
 		try {
+			console.log('[Clipper] presave: dispatching ot-presave event');
 			document.dispatchEvent(new CustomEvent('ot-presave'));
-		} catch {}
+		} catch (e) { console.warn('[Clipper] presave event err', e); }
 		// Yield a microtask so any async snapshot work settles before iframe opens
 		await new Promise(r => setTimeout(r, 0));
 
