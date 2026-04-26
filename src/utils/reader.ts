@@ -2196,6 +2196,45 @@ export class Reader {
 				catch (err) { console.warn('[Translator] snapshot sync error', err); }
 			});
 
+			// Transient live-DOM mutation: getPageContent re-parses the live
+			// document via Defuddle (bypassing data-original-html), so for the
+			// popup Add-to-Obsidian path we wrap originals in <blockquote>
+			// directly on the live tree just long enough for Defuddle to
+			// serialize it. Reverted immediately on 'ot-postsave-live'.
+			doc.addEventListener('ot-presave-live', () => {
+				console.log('[Translator] ot-presave-live, state=', Reader.translateState);
+				if (Reader.liveTransformUndo) return; // already transformed
+				if (Reader.translateState !== 'bilingual') return;
+				const article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;
+				if (!article) return;
+				const undos: Array<() => void> = [];
+				const originals = Array.from(article.querySelectorAll('[data-ot-original]')) as HTMLElement[];
+				for (const orig of originals) {
+					if (orig.tagName !== 'P' && orig.tagName !== 'BLOCKQUOTE') continue;
+					if (orig.closest('li, dt, dd, figcaption')) continue;
+					if (orig.parentElement?.classList.contains('ot-save-quote')) continue;
+					const bq = doc.createElement('blockquote');
+					bq.className = 'ot-save-quote';
+					const parent = orig.parentNode;
+					parent?.insertBefore(bq, orig);
+					bq.appendChild(orig);
+					undos.push(() => {
+						parent?.insertBefore(orig, bq);
+						bq.remove();
+					});
+				}
+				console.log(`[Translator] live wrapped ${undos.length} originals`);
+				Reader.liveTransformUndo = () => {
+					undos.reverse().forEach(fn => fn());
+					Reader.liveTransformUndo = null;
+				};
+			});
+			doc.addEventListener('ot-postsave-live', () => {
+				console.log('[Translator] ot-postsave-live, undoing');
+				try { Reader.liveTransformUndo?.(); }
+				catch (err) { console.warn('[Translator] postsave undo err', err); }
+			});
+
 			// Load the highlighter stylesheet. On a live page (case 2), this
 			// goes through content.js's bridge. On reader.html (case 3), the
 			// local implementation injects the <link> tag directly.
@@ -2990,6 +3029,7 @@ export class Reader {
 	 */
 	private static cleanArticleHtml: string | null = null;
 	private static cleanArticleAttr: string | null = null;
+	private static liveTransformUndo: (() => void) | null = null;
 
 	private static captureCleanArticleSnapshot(doc: Document): void {
 		const article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;

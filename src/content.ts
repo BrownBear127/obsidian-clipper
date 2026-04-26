@@ -221,6 +221,12 @@ declare global {
 		if (request.action === "getPageContent") {
 			// Flatten shadow DOM before extraction (async, needs main world)
 			const flattenTimeout = new Promise<void>(resolve => setTimeout(resolve, 3000));
+			// Bilingual reader: wrap originals in <blockquote> on live DOM so
+			// Defuddle picks them up; we'll undo right after parse below.
+			try {
+				console.log('[Clipper] getPageContent: dispatch ot-presave-live');
+				document.dispatchEvent(new CustomEvent('ot-presave-live'));
+			} catch (e) { console.warn('[Clipper] presave-live dispatch err', e); }
 			Promise.race([flattenShadowDom(document), flattenTimeout]).then(async () => {
 				let selectedHtml = '';
 				const selection = window.getSelection();
@@ -311,9 +317,14 @@ declare global {
 					highlighter.setPageTitle(defuddled.title);
 				}
 				highlighter.updatePageDomainSettings({ site: defuddled.site, favicon: defuddled.favicon });
+				try {
+					console.log('[Clipper] getPageContent: dispatch ot-postsave-live');
+					document.dispatchEvent(new CustomEvent('ot-postsave-live'));
+				} catch (e) { console.warn('[Clipper] postsave-live dispatch err', e); }
 				sendResponse(response);
 			}).catch((error: unknown) => {
 				console.error('[Obsidian Clipper] getPageContent error:', error);
+				try { document.dispatchEvent(new CustomEvent('ot-postsave-live')); } catch {}
 				sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) });
 			});
 			return true;
