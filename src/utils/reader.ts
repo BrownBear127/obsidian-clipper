@@ -31,6 +31,7 @@ import { saveFile } from './file-utils';
 import { parseForClip } from './clip-utils';
 import { updateSidebarWidth, addResizeHandle, cleanupResizeHandlers } from './iframe-resize';
 import { setElementHTML, setSVGChildren, serializeChildren } from './dom-utils';
+import { applyTranslationState, DEFAULT_TRANSLATOR_CONFIG, type ReaderTranslateState } from './translator';
 
 // Mobile viewport settings
 const VIEWPORT = 'width=device-width, initial-scale=1, maximum-scale=1';
@@ -55,6 +56,11 @@ export class Reader {
 	private static programmaticScroll: boolean = false;
 
 	static isReaderPage: boolean = false;
+
+	// Bilingual translation state. Cycles off → bilingual → target_only → off.
+	private static translateState: ReaderTranslateState = 'off';
+	private static translateBtnEl: HTMLButtonElement | null = null;
+	private static translateBusy: boolean = false;
 
 	// Callback for SPA-style navigation on the reader page.
 	// Set by reader-view.ts to handle link clicks without full page reload.
@@ -204,6 +210,21 @@ export class Reader {
 			}
 		});
 
+		// Translate button: cycles off → bilingual → target_only → off
+		const translateBtn = doc.createElement('button');
+		translateBtn.className = 'obsidian-reader-settings-trigger nav-btn';
+		translateBtn.setAttribute('aria-label', 'Translate');
+		translateBtn.setAttribute('title', 'Translate (T)');
+		translateBtn.appendChild(this.createSVG({
+			width: '18', height: '18', viewBox: '0 0 24 24', strokeWidth: '1.75',
+			paths: ['m5 8 6 6', 'm4 14 6-6 2-3', 'M2 5h12', 'M7 2h1', 'm22 22-5-10-5 10', 'M14 18h6'],
+		}));
+		this.translateBtnEl = translateBtn;
+		translateBtn.addEventListener('click', () => {
+			Reader.cycleTranslateState(doc);
+		});
+		this.syncTranslateBtn();
+
 		// Highlighter button
 		const highlighterBtn = doc.createElement('button');
 		highlighterBtn.className = 'obsidian-reader-settings-trigger nav-btn';
@@ -333,6 +354,7 @@ export class Reader {
 		const triggerGroup = doc.createElement('div');
 		triggerGroup.className = 'obsidian-reader-nav';
 		triggerGroup.appendChild(outlineBtn);
+		triggerGroup.appendChild(translateBtn);
 		triggerGroup.appendChild(highlighterBtn);
 		triggerGroup.appendChild(clipButton);
 		triggerGroup.appendChild(trigger);
@@ -2201,6 +2223,9 @@ export class Reader {
 			// H: toggle highlighter
 			Reader.registerHotkey(doc, 'h', () => Reader.toggleHighlighter(doc));
 
+			// T: cycle translation state
+			Reader.registerHotkey(doc, 't', () => Reader.cycleTranslateState(doc));
+
 			// Selection → highlight affordance. When highlighter is OFF and the
 			// user makes a normal text selection inside the article, surface a
 			// floating button that converts the selection into a highlight.
@@ -2233,6 +2258,11 @@ export class Reader {
 			}
 
 			this.populateArticle(doc, main, article, { content, title, author, published, domain, wordCount, parseTime });
+
+			// Re-apply translation if user previously toggled it on for this session
+			if (this.translateState !== 'off') {
+				this.runTranslation(doc, this.translateState).catch(err => console.warn('Reader translate', err));
+			}
 
 			// Use the Defuddle-extracted title (article title only) instead of
 			// document.title (which often includes the site name suffix).
@@ -2429,6 +2459,45 @@ export class Reader {
 			}
 		});
 		window.addEventListener('resize', hide);
+	}
+
+	// Cycle translation state: off → bilingual → target_only → off.
+	private static cycleTranslateState(doc: Document) {
+		if (this.translateBusy) return;
+		const next: ReaderTranslateState =
+			this.translateState === 'off' ? 'bilingual'
+			: this.translateState === 'bilingual' ? 'target_only'
+			: 'off';
+		this.translateState = next;
+		this.syncTranslateBtn();
+		this.runTranslation(doc, next).catch(err => console.warn('Reader translate', err));
+	}
+
+	private static syncTranslateBtn() {
+		const btn = this.translateBtnEl;
+		if (!btn) return;
+		btn.classList.toggle('is-active', this.translateState !== 'off');
+		btn.setAttribute('data-state', this.translateState);
+		const labels: Record<ReaderTranslateState, string> = {
+			off: 'Translate',
+			bilingual: 'Bilingual (原文 + 繁中)',
+			target_only: '繁體中文 only',
+		};
+		btn.setAttribute('aria-label', labels[this.translateState]);
+		btn.setAttribute('title', `${labels[this.translateState]} (T)`);
+	}
+
+	private static async runTranslation(doc: Document, state: ReaderTranslateState) {
+		const article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;
+		if (!article) return;
+		this.translateBusy = true;
+		this.translateBtnEl?.classList.add('is-loading');
+		try {
+			await applyTranslationState(article, state, DEFAULT_TRANSLATOR_CONFIG);
+		} finally {
+			this.translateBusy = false;
+			this.translateBtnEl?.classList.remove('is-loading');
+		}
 	}
 
 	// Single-key hotkey wired to the reader document. Ignores presses while
@@ -2745,7 +2814,44 @@ export class Reader {
 		container.addEventListener('animationend', () => hl().repositionHighlights(), { once: true });
 	}
 
+	/**
+	 * If reader is in bilingual state, wrap each original paragraph in a
+	 * blockquote so the saved markdown renders as:
+	 *   > original
+	 *
+	 *   翻譯
+	 *
+	 * For target_only state, the article DOM already contains only translated
+	 * text (we replaced textContent in place), so no transform is needed.
+	 * For 'off' state, no-op.
+	 *
+	 * Mutates `doc` in place; caller should restore afterwards via reverseSaveTransform.
+	 */
+	private static applySaveTransform(doc: Document): { undo: () => void } {
+		if (this.translateState !== 'bilingual') return { undo: () => {} };
+		const article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;
+		if (!article) return { undo: () => {} };
+		const undos: Array<() => void> = [];
+		const originals = Array.from(article.querySelectorAll('[data-ot-original]')) as HTMLElement[];
+		for (const orig of originals) {
+			// Skip if already inside a blockquote we created (defensive)
+			if (orig.parentElement?.classList.contains('ot-save-quote')) continue;
+			const bq = doc.createElement('blockquote');
+			bq.className = 'ot-save-quote';
+			const parent = orig.parentNode;
+			const next = orig.nextSibling;
+			parent?.insertBefore(bq, orig);
+			bq.appendChild(orig);
+			undos.push(() => {
+				parent?.insertBefore(orig, bq);
+				bq.remove();
+			});
+		}
+		return { undo: () => { undos.reverse().forEach(fn => fn()); } };
+	}
+
 	static copyMarkdownOnReaderPage(doc: Document): void {
+		const xform = this.applySaveTransform(doc);
 		try {
 			const defuddled = parseForClip(doc);
 			const markdown = createMarkdownContent(defuddled.content, doc.URL);
@@ -2759,10 +2865,13 @@ export class Reader {
 			});
 		} catch (err) {
 			console.error('Failed to copy markdown:', err);
+		} finally {
+			xform.undo();
 		}
 	}
 
 	static async saveMarkdownOnReaderPage(doc: Document): Promise<void> {
+		const xform = this.applySaveTransform(doc);
 		try {
 			const defuddled = parseForClip(doc);
 			const markdown = createMarkdownContent(defuddled.content, doc.URL);
@@ -2771,6 +2880,8 @@ export class Reader {
 			await saveFile({ content: markdown, fileName, mimeType: 'text/markdown' });
 		} catch (err) {
 			console.error('Failed to save markdown:', err);
+		} finally {
+			xform.undo();
 		}
 	}
 }

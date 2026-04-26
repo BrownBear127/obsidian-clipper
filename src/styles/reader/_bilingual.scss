@@ -1,0 +1,67 @@
+/* Bilingual reader translation styles (Phase 1) */
+
+.obsidian-reader-active {
+	/* Translated paragraph inserted right after original (state=bilingual) */
+	.ot-bilingual-translated {
+		color: var(--text-muted, var(--text-normal));
+		opacity: 0.92;
+		font-size: 0.96em;
+		margin-top: 0.25em;
+		margin-bottom: 1em;
+		padding-left: 0.6em;
+		border-left: 2px solid var(--background-modifier-border, rgba(127,127,127,0.25));
+
+		&.ot-h2, &.ot-h3, &.ot-h4, &.ot-h5, &.ot-h6 {
+			font-weight: 500;
+			margin-top: 0.1em;
+			margin-bottom: 0.4em;
+		}
+
+		&.ot-blockquote {
+			font-style: italic;
+		}
+
+		&.ot-li {
+			list-style: none;
+			margin-left: 0;
+		}
+	}
+
+	/* Pending state: subtle pulse on paragraphs being translated */
+	.ot-translating {
+		position: relative;
+
+		&::after {
+			content: '';
+			position: absolute;
+			inset: 0;
+			background: linear-gradient(
+				90deg,
+				transparent 0%,
+				var(--background-modifier-hover, rgba(127,127,127,0.08)) 50%,
+				transparent 100%
+			);
+			background-size: 200% 100%;
+			animation: ot-shimmer 1.4s linear infinite;
+			pointer-events: none;
+			border-radius: 3px;
+		}
+	}
+
+	@keyframes ot-shimmer {
+		0%   { background-position: 200% 0; }
+		100% { background-position: -200% 0; }
+	}
+
+	/* Loading spinner indicator on translate button */
+	.obsidian-reader-settings-trigger.is-loading {
+		opacity: 0.6;
+		pointer-events: none;
+	}
+
+	/* Active state highlight for translate button */
+	.obsidian-reader-settings-trigger[data-state="bilingual"],
+	.obsidian-reader-settings-trigger[data-state="target_only"] {
+		color: var(--text-accent, var(--interactive-accent));
+	}
+}
