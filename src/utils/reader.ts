@@ -2498,10 +2498,16 @@ export class Reader {
 		if (!article) article = doc.querySelector('article') as HTMLElement | null;
 		console.log('[Translator] article found?', !!article, article?.children.length, 'children');
 		if (!article) return;
-		// Title <h1> sits in main outside article — include it so translate covers headline
+		// Title <h1> sits in main outside article — include it so reader's headline
+		// also translates. Skip if article already has its own h1 with the same text
+		// (Reader-generated main > h1 mirrors article h1, would translate twice).
 		const main = doc.querySelector('.obsidian-reader-content main') as HTMLElement | null;
 		const titleH1 = main?.querySelector(':scope > h1') as HTMLElement | null;
-		const extraRoots: HTMLElement[] = titleH1 ? [titleH1] : [];
+		const articleH1Texts = new Set(
+			Array.from(article.querySelectorAll('h1')).map(h => (h.textContent || '').trim())
+		);
+		const extraRoots: HTMLElement[] = (titleH1 && !articleH1Texts.has((titleH1.textContent || '').trim()))
+			? [titleH1] : [];
 		this.translateBusy = true;
 		this.translateBtnEl?.classList.add('is-loading');
 		try {
