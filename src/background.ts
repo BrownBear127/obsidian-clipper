@@ -377,7 +377,7 @@ browser.runtime.onMessage.addListener((request: unknown, sender: browser.Runtime
 					// echo back <source_text>...</source_text>). Strip both so
 					// splitTolerant on the client sees a clean separator-only stream.
 					out = out
-						.replace(/^\s*<\s*(?:target_text|source_text)\s*>\s*/i, '')
+						.replace(/^\s*<\s*(?:target_text|source_text)\b[^>]*>\s*/i, '')
 						.replace(/\s*<\s*\/\s*(?:target_text|source_text)\s*>\s*$/i, '');
 					// Return raw — content side does tolerant splitting
 					sendResponse({ raw: out });

@@ -367,20 +367,40 @@ export function clearTranslationCacheStorage(): void {
  * doesn't kill the SW while a long-running translation is in flight. Without
  * this, the SW can be suspended mid-fetch and `sendMessage` rejects with
  * "message channel closed before a response was received".
+ *
+ * Chrome enforces a 5-minute hard cap on a single port lifetime. We re-attach
+ * recursively so a translation longer than 5min stays covered, and we track
+ * the *current* port so close() always disconnects the live one (no leak).
  */
 function openKeepalivePort(): { close: () => void } {
-	try {
-		const port = rt().connect({ name: 'ot-translator-keepalive' });
-		// Some hosts auto-disconnect ports after 5 min — re-open if that happens.
-		let active = true;
+	let active = true;
+	let currentPort: any = null;
+
+	const attach = (): void => {
+		if (!active) return;
+		let port: any;
+		try { port = rt().connect({ name: 'ot-translator-keepalive' }); }
+		catch { return; }
+		currentPort = port;
 		port.onDisconnect.addListener(() => {
+			// Only re-attach if WE didn't initiate the close. If active is
+			// false, close() ran and we're done. If the disconnect was the
+			// 5-min cap, currentPort still points at this port, so re-attach.
 			if (!active) return;
-			try { rt().connect({ name: 'ot-translator-keepalive' }); } catch {}
+			if (currentPort === port) attach();
 		});
-		return { close: () => { active = false; try { port.disconnect(); } catch {} } };
-	} catch {
-		return { close: () => {} };
-	}
+	};
+
+	attach();
+
+	return {
+		close: () => {
+			active = false;
+			const p = currentPort;
+			currentPort = null;
+			try { p?.disconnect(); } catch {}
+		},
+	};
 }
 
 /**
