@@ -363,6 +363,27 @@ export function clearTranslationCacheStorage(): void {
 }
 
 /**
+ * Open a long-lived port to the background service worker so Chrome MV3
+ * doesn't kill the SW while a long-running translation is in flight. Without
+ * this, the SW can be suspended mid-fetch and `sendMessage` rejects with
+ * "message channel closed before a response was received".
+ */
+function openKeepalivePort(): { close: () => void } {
+	try {
+		const port = rt().connect({ name: 'ot-translator-keepalive' });
+		// Some hosts auto-disconnect ports after 5 min — re-open if that happens.
+		let active = true;
+		port.onDisconnect.addListener(() => {
+			if (!active) return;
+			try { rt().connect({ name: 'ot-translator-keepalive' }); } catch {}
+		});
+		return { close: () => { active = false; try { port.disconnect(); } catch {} } };
+	} catch {
+		return { close: () => {} };
+	}
+}
+
+/**
  * Apply translation state to the article.
  * Idempotent — calling repeatedly with the same state is a no-op for already-rendered nodes.
  */
@@ -505,18 +526,24 @@ export async function applyTranslationState(
 
 	// Worker pool over batches: keep --parallel slots saturated while still
 	// rendering each slice as soon as its batch returns (incremental UX).
-	let cursor = 0;
-	const workers: Promise<void>[] = [];
-	for (let w = 0; w < Math.min(MAX_CONCURRENCY, slices.length); w++) {
-		workers.push((async () => {
-			while (true) {
-				const my = cursor++;
-				if (my >= slices.length) return;
-				await renderSlice(slices[my]);
-			}
-		})());
+	// Hold a port to background SW so Chrome MV3 doesn't suspend it mid-fetch.
+	const keepalive = openKeepalivePort();
+	try {
+		let cursor = 0;
+		const workers: Promise<void>[] = [];
+		for (let w = 0; w < Math.min(MAX_CONCURRENCY, slices.length); w++) {
+			workers.push((async () => {
+				while (true) {
+					const my = cursor++;
+					if (my >= slices.length) return;
+					await renderSlice(slices[my]);
+				}
+			})());
+		}
+		await Promise.all(workers);
+	} finally {
+		keepalive.close();
 	}
-	await Promise.all(workers);
 }
 
 export function clearTranslationCache(): void {

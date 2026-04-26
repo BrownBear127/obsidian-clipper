@@ -269,6 +269,11 @@ browser.runtime.onConnect.addListener((port) => {
 				delete popupPorts[tabId];
 			});
 		}
+	} else if (port.name === 'ot-translator-keepalive') {
+		// Holding the port keeps the MV3 service worker alive while a long
+		// translation is in flight. No messages are exchanged on this port —
+		// it just exists so Chrome doesn't suspend us mid-fetch.
+		port.onDisconnect.addListener(() => {});
 	}
 });
 
