@@ -16,10 +16,9 @@
  */
 
 const BATCH_SIZE = 5;
-// One slot less than server `--parallel 4` so retries (single-paragraph
-// per-segment fallback) always have a free slot, avoiding TypeError: Failed
-// to fetch from saturated connection pool.
-const MAX_CONCURRENCY = 3;
+// Match server `--parallel 4` — with the <target_text> echo strip in
+// background.ts, batch retries are rare so we can saturate all slots.
+const MAX_CONCURRENCY = 4;
 // Sent to model. Tolerant regex below accepts whitespace/case variants the
 // model often introduces (### ||| ### / ### | ### / ###  |||  ### etc).
 const SEPARATOR = '\n\n<<<SEG>>>\n\n';
