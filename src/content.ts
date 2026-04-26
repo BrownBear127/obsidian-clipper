@@ -53,10 +53,19 @@ declare global {
 
 		// If reader bilingual translate is on, refresh the save snapshot first
 		// so popup iframe (Add to Obsidian) reads the translated version.
+		// We try BOTH paths because MV3 isolated worlds don't share window
+		// globals between independently-injected content scripts (reader-script
+		// vs content.js): direct call works if same world; CustomEvent works
+		// across the DOM regardless of world.
 		try {
 			const hook = (window as any).__otReaderSyncSaveSnapshot;
 			if (typeof hook === 'function') hook();
 		} catch {}
+		try {
+			document.dispatchEvent(new CustomEvent('ot-presave'));
+		} catch {}
+		// Yield a microtask so any async snapshot work settles before iframe opens
+		await new Promise(r => setTimeout(r, 0));
 
 		await ensureHighlighterCSS();
 

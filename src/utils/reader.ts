@@ -2186,9 +2186,13 @@ export class Reader {
 			// Add reader classes and attributes
 			doc.documentElement.classList.add('obsidian-reader-active');
 
-			// Expose a save-snapshot hook for the content-script's toggleIframe path
-			// so the Add-to-Obsidian popup picks up bilingual transforms.
+			// Expose a save-snapshot hook for the content-script's toggleIframe path.
+			// MV3 isolated worlds may not share window globals between content scripts,
+			// so we ALSO listen for a DOM-level CustomEvent dispatched by content.ts.
 			(window as any).__otReaderSyncSaveSnapshot = () => Reader.syncSaveSnapshot(doc);
+			doc.addEventListener('ot-presave', () => {
+				try { Reader.syncSaveSnapshot(doc); } catch {}
+			});
 
 			// Load the highlighter stylesheet. On a live page (case 2), this
 			// goes through content.js's bridge. On reader.html (case 3), the

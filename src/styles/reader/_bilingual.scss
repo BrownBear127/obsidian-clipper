@@ -99,9 +99,20 @@ textarea.obsidian-reader-translator-input {
 			font-style: italic;
 		}
 
-		&.ot-li {
-			list-style: none;
-			margin-left: 0;
+		&.ot-li, &.ot-dt, &.ot-dd {
+			// Inside-li inline translation: render as a nested block under the
+			// original list item, no extra list marker, indented for clarity
+			display: block;
+			margin-top: 0.2em;
+			margin-bottom: 0.2em;
+			padding-left: 0.6em;
+			border-left: 2px solid var(--background-modifier-border, rgba(127,127,127,0.25));
+		}
+
+		&.ot-inline {
+			// Inline child translation block (used for list items)
+			display: block;
+			margin-top: 0.3em;
 		}
 	}
 

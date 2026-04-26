@@ -363,22 +363,42 @@ export async function applyTranslationState(
 				if (stashedHtml !== null && el.innerHTML !== stashedHtml) {
 					el.innerHTML = stashedHtml;
 				}
-				// Insert/refresh translated sibling right after the original
-				let sibling = el.nextElementSibling;
-				if (sibling && sibling.classList.contains(BILINGUAL_CLASS) && sibling.getAttribute('data-for') === el.getAttribute(ORIG_ATTR)) {
-					sibling.textContent = translated;
+
+				const isListItem = el.tagName === 'LI' || el.tagName === 'DT' || el.tagName === 'DD';
+
+				if (isListItem) {
+					// For list items, append a child block inside the li so we
+					// don't insert sibling <li>s that break ordered-list numbering.
+					let inner = el.querySelector(`:scope > .${BILINGUAL_CLASS}`) as HTMLElement | null;
+					if (inner) {
+						inner.textContent = translated;
+					} else {
+						inner = doc.createElement('div');
+						inner.className = `${BILINGUAL_CLASS} ot-inline ot-${el.tagName.toLowerCase()}`;
+						inner.setAttribute('data-for', el.getAttribute(ORIG_ATTR) || '');
+						inner.textContent = translated;
+						el.appendChild(inner);
+					}
 				} else {
-					if (sibling && sibling.classList.contains(BILINGUAL_CLASS)) sibling.remove();
-					const trans = doc.createElement(el.tagName.toLowerCase());
-					trans.className = `${BILINGUAL_CLASS} ot-${el.tagName.toLowerCase()}`;
-					trans.setAttribute('data-for', el.getAttribute(ORIG_ATTR) || '');
-					trans.textContent = translated;
-					el.insertAdjacentElement('afterend', trans);
+					// Insert/refresh translated sibling right after the original
+					let sibling = el.nextElementSibling;
+					if (sibling && sibling.classList.contains(BILINGUAL_CLASS) && sibling.getAttribute('data-for') === el.getAttribute(ORIG_ATTR)) {
+						sibling.textContent = translated;
+					} else {
+						if (sibling && sibling.classList.contains(BILINGUAL_CLASS)) sibling.remove();
+						const trans = doc.createElement(el.tagName.toLowerCase());
+						trans.className = `${BILINGUAL_CLASS} ot-${el.tagName.toLowerCase()}`;
+						trans.setAttribute('data-for', el.getAttribute(ORIG_ATTR) || '');
+						trans.textContent = translated;
+						el.insertAdjacentElement('afterend', trans);
+					}
 				}
 			} else if (state === 'target_only') {
-				// Remove any bilingual sibling first
+				// Remove any bilingual sibling AND any inline child translation
 				const sibling = el.nextElementSibling;
 				if (sibling && sibling.classList.contains(BILINGUAL_CLASS)) sibling.remove();
+				const childTrans = el.querySelector(`:scope > .${BILINGUAL_CLASS}`);
+				if (childTrans) childTrans.remove();
 				if (translated) {
 					el.textContent = translated;
 				}
