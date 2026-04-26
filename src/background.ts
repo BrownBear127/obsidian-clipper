@@ -343,7 +343,8 @@ browser.runtime.onMessage.addListener((request: unknown, sender: browser.Runtime
 				const ctrl = new AbortController();
 				const timeout = setTimeout(() => ctrl.abort(), r.config.timeoutMs);
 				try {
-					const userContent = r.texts.join(r.separator);
+					const inner = r.texts.join(r.separator);
+					const userContent = `<source_text>\n${inner}\n</source_text>`;
 					const resp = await fetch(r.config.endpoint, {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
