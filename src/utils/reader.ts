@@ -220,10 +220,13 @@ export class Reader {
 			paths: ['m5 8 6 6', 'm4 14 6-6 2-3', 'M2 5h12', 'M7 2h1', 'm22 22-5-10-5 10', 'M14 18h6'],
 		}));
 		this.translateBtnEl = translateBtn;
-		translateBtn.addEventListener('click', () => {
+		translateBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			console.log('[Translator] button clicked');
 			Reader.cycleTranslateState(doc);
 		});
 		this.syncTranslateBtn();
+		console.log('[Translator] button injected');
 
 		// Highlighter button
 		const highlighterBtn = doc.createElement('button');
@@ -2463,6 +2466,7 @@ export class Reader {
 
 	// Cycle translation state: off → bilingual → target_only → off.
 	private static cycleTranslateState(doc: Document) {
+		console.log('[Translator] cycleTranslateState clicked, current=', this.translateState, 'busy=', this.translateBusy);
 		if (this.translateBusy) return;
 		const next: ReaderTranslateState =
 			this.translateState === 'off' ? 'bilingual'
@@ -2470,7 +2474,8 @@ export class Reader {
 			: 'off';
 		this.translateState = next;
 		this.syncTranslateBtn();
-		this.runTranslation(doc, next).catch(err => console.warn('Reader translate', err));
+		console.log('[Translator] running, next state=', next);
+		this.runTranslation(doc, next).catch(err => console.warn('[Translator] error', err));
 	}
 
 	private static syncTranslateBtn() {
@@ -2488,12 +2493,21 @@ export class Reader {
 	}
 
 	private static async runTranslation(doc: Document, state: ReaderTranslateState) {
-		const article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;
+		let article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;
+		if (!article) article = doc.querySelector('.obsidian-reader-content main article') as HTMLElement | null;
+		if (!article) article = doc.querySelector('article') as HTMLElement | null;
+		console.log('[Translator] article found?', !!article, article?.children.length, 'children');
 		if (!article) return;
+		// Title <h1> sits in main outside article — include it so translate covers headline
+		const main = doc.querySelector('.obsidian-reader-content main') as HTMLElement | null;
+		const titleH1 = main?.querySelector(':scope > h1') as HTMLElement | null;
+		const extraRoots: HTMLElement[] = titleH1 ? [titleH1] : [];
 		this.translateBusy = true;
 		this.translateBtnEl?.classList.add('is-loading');
 		try {
-			await applyTranslationState(article, state, DEFAULT_TRANSLATOR_CONFIG);
+			await applyTranslationState(article, state, DEFAULT_TRANSLATOR_CONFIG, (done, total) => {
+				if (done % 5 === 0 || done === total) console.log(`[Translator] progress ${done}/${total}`);
+			}, extraRoots);
 		} finally {
 			this.translateBusy = false;
 			this.translateBtnEl?.classList.remove('is-loading');
@@ -2828,26 +2842,52 @@ export class Reader {
 	 * Mutates `doc` in place; caller should restore afterwards via reverseSaveTransform.
 	 */
 	private static applySaveTransform(doc: Document): { undo: () => void } {
-		if (this.translateState !== 'bilingual') return { undo: () => {} };
+		if (this.translateState === 'off') return { undo: () => {} };
 		const article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;
 		if (!article) return { undo: () => {} };
+
+		// CRITICAL: parseForClip prefers `data-original-html` over live DOM.
+		// We must overwrite that attribute with our transformed serialization,
+		// then restore on undo.
+		const prevOriginalHtml = article.getAttribute('data-original-html');
+
 		const undos: Array<() => void> = [];
-		const originals = Array.from(article.querySelectorAll('[data-ot-original]')) as HTMLElement[];
-		for (const orig of originals) {
-			// Skip if already inside a blockquote we created (defensive)
-			if (orig.parentElement?.classList.contains('ot-save-quote')) continue;
-			const bq = doc.createElement('blockquote');
-			bq.className = 'ot-save-quote';
-			const parent = orig.parentNode;
-			const next = orig.nextSibling;
-			parent?.insertBefore(bq, orig);
-			bq.appendChild(orig);
-			undos.push(() => {
-				parent?.insertBefore(orig, bq);
-				bq.remove();
-			});
+
+		if (this.translateState === 'bilingual') {
+			const originals = Array.from(article.querySelectorAll('[data-ot-original]')) as HTMLElement[];
+			for (const orig of originals) {
+				if (orig.parentElement?.classList.contains('ot-save-quote')) continue;
+				const bq = doc.createElement('blockquote');
+				bq.className = 'ot-save-quote';
+				const parent = orig.parentNode;
+				parent?.insertBefore(bq, orig);
+				bq.appendChild(orig);
+				undos.push(() => {
+					parent?.insertBefore(orig, bq);
+					bq.remove();
+				});
+			}
 		}
-		return { undo: () => { undos.reverse().forEach(fn => fn()); } };
+		// target_only: live DOM already has translated text; nothing to wrap.
+
+		// Serialize current article state into data-original-html so parseForClip
+		// reads our transformed content
+		const clone = article.cloneNode(true) as Element;
+		clone.querySelectorAll('span.timestamp').forEach(span => {
+			span.replaceWith(span.textContent || '');
+		});
+		article.setAttribute('data-original-html', serializeChildren(clone));
+
+		return {
+			undo: () => {
+				undos.reverse().forEach(fn => fn());
+				if (prevOriginalHtml !== null) {
+					article.setAttribute('data-original-html', prevOriginalHtml);
+				} else {
+					article.removeAttribute('data-original-html');
+				}
+			},
+		};
 	}
 
 	static copyMarkdownOnReaderPage(doc: Document): void {

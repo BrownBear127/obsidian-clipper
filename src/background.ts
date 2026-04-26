@@ -334,7 +334,49 @@ browser.runtime.onMessage.addListener((request: unknown) => {
 browser.runtime.onMessage.addListener((request: unknown, sender: browser.Runtime.MessageSender, sendResponse: (response?: any) => void): true | undefined => {
 	if (typeof request === 'object' && request !== null) {
 		const typedRequest = request as { action: string; isActive?: boolean; hasHighlights?: boolean; tabId?: number; text?: string; section?: string; readerUrl?: string };
-		
+
+		// Bilingual reader translator: proxy fetch from BG so we use extension
+		// origin (bypasses page CSP) and host_permissions for localhost.
+		if (typedRequest.action === 'ot-translate-batch') {
+			const r = request as { texts: string[]; config: { endpoint: string; model: string; systemPrompt: string; timeoutMs: number }; separator: string };
+			(async () => {
+				const ctrl = new AbortController();
+				const timeout = setTimeout(() => ctrl.abort(), r.config.timeoutMs);
+				try {
+					const userContent = r.texts.join(r.separator);
+					const resp = await fetch(r.config.endpoint, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							model: r.config.model,
+							messages: [
+								{ role: 'system', content: r.config.systemPrompt },
+								{ role: 'user', content: userContent },
+							],
+							temperature: 0.2,
+							top_p: 0.9,
+							top_k: 40,
+							min_p: 0.0,
+							repeat_penalty: 1.05,
+							repeat_last_n: 1024,
+							stream: false,
+						}),
+						signal: ctrl.signal,
+					});
+					if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+					const json: any = await resp.json();
+					const out: string = json?.choices?.[0]?.message?.content ?? '';
+					// Return raw — content side does tolerant splitting
+					sendResponse({ raw: out });
+				} catch (err) {
+					sendResponse({ error: (err as Error).message || String(err) });
+				} finally {
+					clearTimeout(timeout);
+				}
+			})();
+			return true;
+		}
+
 		if (typedRequest.action === 'copy-to-clipboard' && typedRequest.text) {
 			// Use content script to copy to clipboard
 			browser.tabs.query({active: true, currentWindow: true}).then(async (tabs) => {
