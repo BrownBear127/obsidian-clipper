@@ -16,8 +16,10 @@
  */
 
 const BATCH_SIZE = 5;
-// Match server `--parallel 4` so we keep all slots busy without queueing.
-const MAX_CONCURRENCY = 4;
+// One slot less than server `--parallel 4` so retries (single-paragraph
+// per-segment fallback) always have a free slot, avoiding TypeError: Failed
+// to fetch from saturated connection pool.
+const MAX_CONCURRENCY = 3;
 // Sent to model. Tolerant regex below accepts whitespace/case variants the
 // model often introduces (### ||| ### / ### | ### / ###  |||  ### etc).
 const SEPARATOR = '\n\n<<<SEG>>>\n\n';
@@ -61,7 +63,7 @@ export function buildDefaultSystemPrompt(targetLang: string): string {
 		'',
 		'### Rules',
 		'1. The source contains multiple paragraphs separated by `<<<SEG>>>`. Output MUST preserve the same paragraph count, separated by `<<<SEG>>>` (verbatim, never translate this marker).',
-		'2. Output only translated text + separators. No preamble, no markdown wrapper, no numbering, no commentary, no <source_text> wrapper.',
+		'2. Output ONLY raw translated text + the `<<<SEG>>>` separators. NEVER wrap your output in any tag (no <target_text>, no <source_text>, no <translation>, no <output>). NEVER add preamble, markdown wrapper, numbering, or commentary.',
 		'3. Preserve original punctuation and line-break rhythm.',
 		'4. Keep proper nouns, code, URLs, numbers, person names, place names, and template placeholders like {word} or {sentence} as-is.',
 		`5. ALWAYS translate non-${targetLang} content (Japanese, English, Korean, etc) into ${targetLang}. NEVER echo the source verbatim. Short fragments still need translation.`,

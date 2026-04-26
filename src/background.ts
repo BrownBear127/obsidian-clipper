@@ -366,7 +366,14 @@ browser.runtime.onMessage.addListener((request: unknown, sender: browser.Runtime
 					});
 					if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 					const json: any = await resp.json();
-					const out: string = json?.choices?.[0]?.message?.content ?? '';
+					let out: string = json?.choices?.[0]?.message?.content ?? '';
+					// Some models mirror the system-prompt's <source_text> framing
+					// and wrap their output in <target_text>...</target_text> (or
+					// echo back <source_text>...</source_text>). Strip both so
+					// splitTolerant on the client sees a clean separator-only stream.
+					out = out
+						.replace(/^\s*<\s*(?:target_text|source_text)\s*>\s*/i, '')
+						.replace(/\s*<\s*\/\s*(?:target_text|source_text)\s*>\s*$/i, '');
 					// Return raw — content side does tolerant splitting
 					sendResponse({ raw: out });
 				} catch (err) {
