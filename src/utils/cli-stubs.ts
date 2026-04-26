@@ -39,6 +39,11 @@ export const generalSettings: Settings = {
 		autoScroll: true,
 		highlightActiveLine: true,
 		customCss: '',
+		translatorEnabled: false,
+		translatorEndpoint: 'http://127.0.0.1:8843/v1/chat/completions',
+		translatorModel: 'qwen3-4b-translator',
+		translatorTargetLang: '繁體中文（台灣）',
+		translatorSystemPrompt: '',
 	},
 	stats: {
 		addToObsidian: 0,
