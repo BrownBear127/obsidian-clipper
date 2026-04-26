@@ -430,10 +430,13 @@ export async function applyTranslationState(
 	const total = items.length;
 	onProgress?.(done, total);
 
-	// Translate in batches; render incrementally so reader doesn't appear stuck
+	// Slice once up front so the worker pool can pull batches concurrently.
+	const slices: { el: HTMLElement; text: string }[][] = [];
 	for (let i = 0; i < items.length; i += BATCH_SIZE) {
-		const slice = items.slice(i, i + BATCH_SIZE);
-		// Mark as translating for visual feedback
+		slices.push(items.slice(i, i + BATCH_SIZE));
+	}
+
+	const renderSlice = async (slice: { el: HTMLElement; text: string }[]): Promise<void> => {
 		slice.forEach(s => s.el.classList.add(TRANSLATING_CLASS));
 
 		const translations = await translateTexts(slice.map(s => s.text), cfg);
@@ -497,7 +500,22 @@ export async function applyTranslationState(
 			done++;
 			onProgress?.(done, total);
 		}
+	};
+
+	// Worker pool over batches: keep --parallel slots saturated while still
+	// rendering each slice as soon as its batch returns (incremental UX).
+	let cursor = 0;
+	const workers: Promise<void>[] = [];
+	for (let w = 0; w < Math.min(MAX_CONCURRENCY, slices.length); w++) {
+		workers.push((async () => {
+			while (true) {
+				const my = cursor++;
+				if (my >= slices.length) return;
+				await renderSlice(slices[my]);
+			}
+		})());
 	}
+	await Promise.all(workers);
 }
 
 export function clearTranslationCache(): void {
