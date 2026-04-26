@@ -202,7 +202,12 @@ const INSTRUCTION_ANSWER_WORDS = new Set([
 //   - kana echo: target is Chinese but output retains substantial Japanese kana
 //   - instruction-following: source had > 30 chars but model returned a single
 //     short answer-token (YES/NO/無/None) — it followed the source as a command.
-//   - length collapse: translation < 1/4 of source length when source > 50 chars
+//   - length collapse: translation absurdly short vs source.
+//
+// Safety net: if the translation already contains a healthy fraction of
+// target-language chars (Han for Chinese targets), trust the translation
+// even when other heuristics would flag it. EN→ZH compresses ~4-6× in
+// char count, so naïve length-ratio checks alone over-trigger.
 function isLikelyUntranslated(source: string, translated: string, targetLang: string): boolean {
 	if (!translated) return true;
 	const t = translated.trim();
@@ -215,10 +220,19 @@ function isLikelyUntranslated(source: string, translated: string, targetLang: st
 		if (INSTRUCTION_ANSWER_WORDS.has(lc)) return true;
 	}
 
-	// Length collapse on a substantial source = likely truncated/summarized
-	if (s.length > 50 && t.length < s.length / 4) return true;
-
 	const wantsChinese = /中文|繁體|繁体|简体|chinese/i.test(targetLang);
+
+	// Trust check: if target is Chinese and the output is meaningfully Han-y
+	// (≥ 30% Han chars over a non-trivial output), it's a real translation.
+	if (wantsChinese && t.length >= 4) {
+		const han = (t.match(/[一-鿿㐀-䶿]/g) || []).length;
+		if (han / t.length >= 0.3) return false;
+	}
+
+	// Length collapse — only flag truly absurd compression (< 1/8, not 1/4)
+	// since EN→ZH legitimately runs 4-6× shorter in chars.
+	if (s.length > 80 && t.length < s.length / 8) return true;
+
 	if (!wantsChinese) return false;
 	const kanaCount = (str: string): number => {
 		const m = str.match(/[぀-ゟ゠-ヿ]/g);
