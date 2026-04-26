@@ -1065,5 +1065,41 @@
 	},
 	"version": {
 		"message": "Version"
+	},
+	"translate": {
+		"message": "Translate"
+	},
+	"translateBilingual": {
+		"message": "Bilingual (original + translation)"
+	},
+	"translateTargetOnly": {
+		"message": "Translation only"
+	},
+	"translateOff": {
+		"message": "Off"
+	},
+	"translateSectionTitle": {
+		"message": "Translation"
+	},
+	"translateAutoOn": {
+		"message": "Auto-translate when reader opens"
+	},
+	"translateEndpoint": {
+		"message": "Endpoint"
+	},
+	"translateModel": {
+		"message": "Model"
+	},
+	"translateTargetLang": {
+		"message": "Target language"
+	},
+	"translateSystemPrompt": {
+		"message": "System prompt (optional)"
+	},
+	"translateSystemPromptPlaceholder": {
+		"message": "Leave blank to use the built-in default."
+	},
+	"translateSettingsNote": {
+		"message": "Settings save automatically. Toggle translation: A button in nav, or press T."
 	}
 }

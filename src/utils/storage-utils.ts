@@ -37,7 +37,12 @@ export let generalSettings: Settings = {
 		pinPlayer: true,
 		autoScroll: true,
 		highlightActiveLine: true,
-		customCss: ''
+		customCss: '',
+		translatorEnabled: false,
+		translatorEndpoint: 'http://127.0.0.1:8843/v1/chat/completions',
+		translatorModel: 'qwen3-4b-translator',
+		translatorTargetLang: '繁體中文（台灣）',
+		translatorSystemPrompt: '',
 	},
 	stats: {
 		addToObsidian: 0,
@@ -89,6 +94,11 @@ interface StorageData {
 		autoScroll?: boolean;
 		highlightActiveLine?: boolean;
 		customCss?: string;
+		translatorEnabled?: boolean;
+		translatorEndpoint?: string;
+		translatorModel?: string;
+		translatorTargetLang?: string;
+		translatorSystemPrompt?: string;
 	};
 	interpreter_settings?: {
 		interpreterModel?: string;
@@ -149,7 +159,12 @@ export async function loadSettings(): Promise<Settings> {
 			pinPlayer: true,
 			autoScroll: true,
 			highlightActiveLine: true,
-			customCss: ''
+			customCss: '',
+			translatorEnabled: false,
+			translatorEndpoint: 'http://127.0.0.1:8843/v1/chat/completions',
+			translatorModel: 'qwen3-4b-translator',
+			translatorTargetLang: '繁體中文（台灣）',
+			translatorSystemPrompt: '',
 		},
 		stats: {
 			addToObsidian: 0,
@@ -211,7 +226,12 @@ export async function loadSettings(): Promise<Settings> {
 			pinPlayer: data.reader_settings?.pinPlayer ?? defaultSettings.readerSettings.pinPlayer,
 			autoScroll: data.reader_settings?.autoScroll ?? defaultSettings.readerSettings.autoScroll,
 			highlightActiveLine: data.reader_settings?.highlightActiveLine ?? defaultSettings.readerSettings.highlightActiveLine,
-			customCss: data.reader_settings?.customCss ?? defaultSettings.readerSettings.customCss
+			customCss: data.reader_settings?.customCss ?? defaultSettings.readerSettings.customCss,
+			translatorEnabled: data.reader_settings?.translatorEnabled ?? defaultSettings.readerSettings.translatorEnabled,
+			translatorEndpoint: data.reader_settings?.translatorEndpoint ?? defaultSettings.readerSettings.translatorEndpoint,
+			translatorModel: data.reader_settings?.translatorModel ?? defaultSettings.readerSettings.translatorModel,
+			translatorTargetLang: data.reader_settings?.translatorTargetLang ?? defaultSettings.readerSettings.translatorTargetLang,
+			translatorSystemPrompt: data.reader_settings?.translatorSystemPrompt ?? defaultSettings.readerSettings.translatorSystemPrompt,
 		},
 		stats: data.stats || defaultSettings.stats,
 		history: data.history || defaultSettings.history,
@@ -268,7 +288,12 @@ export async function saveSettings(settings?: Partial<Settings>): Promise<void> 
 			pinPlayer: generalSettings.readerSettings.pinPlayer,
 			autoScroll: generalSettings.readerSettings.autoScroll,
 			highlightActiveLine: generalSettings.readerSettings.highlightActiveLine,
-			customCss: generalSettings.readerSettings.customCss
+			customCss: generalSettings.readerSettings.customCss,
+			translatorEnabled: generalSettings.readerSettings.translatorEnabled,
+			translatorEndpoint: generalSettings.readerSettings.translatorEndpoint,
+			translatorModel: generalSettings.readerSettings.translatorModel,
+			translatorTargetLang: generalSettings.readerSettings.translatorTargetLang,
+			translatorSystemPrompt: generalSettings.readerSettings.translatorSystemPrompt,
 		},
 		stats: generalSettings.stats
 	});

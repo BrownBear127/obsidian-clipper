@@ -1,4 +1,82 @@
-/* Bilingual reader translation styles (Phase 1) */
+/* Bilingual reader translation styles (Phase 1 + 1.5) */
+
+/* Translator settings panel inside reader settings overlay */
+.obsidian-reader-translator-panel {
+	margin: 12px 8px 0;
+	padding: 8px 10px;
+	border-top: 1px solid var(--background-modifier-border, rgba(127, 127, 127, 0.2));
+	font-size: 13px;
+
+	> summary {
+		cursor: pointer;
+		font-weight: 600;
+		padding: 4px 0;
+		user-select: none;
+		opacity: 0.85;
+	}
+
+	&[open] > summary {
+		opacity: 1;
+		margin-bottom: 8px;
+	}
+}
+
+.obsidian-reader-translator-fields {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.obsidian-reader-translator-row {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	cursor: default;
+
+	&.ot-row-checkbox {
+		flex-direction: row;
+		align-items: center;
+		gap: 8px;
+		cursor: pointer;
+	}
+}
+
+.obsidian-reader-translator-label {
+	font-weight: 500;
+	opacity: 0.75;
+	font-size: 12px;
+}
+
+.obsidian-reader-translator-input {
+	background: var(--background-primary, transparent);
+	color: var(--text-normal, currentColor);
+	border: 1px solid var(--background-modifier-border, rgba(127, 127, 127, 0.3));
+	border-radius: 4px;
+	padding: 4px 6px;
+	font-family: inherit;
+	font-size: 12px;
+	width: 100%;
+	box-sizing: border-box;
+
+	&:focus {
+		outline: none;
+		border-color: var(--interactive-accent, #6366f1);
+	}
+}
+
+textarea.obsidian-reader-translator-input {
+	resize: vertical;
+	min-height: 60px;
+	font-family: var(--font-monospace, monospace);
+}
+
+.obsidian-reader-translator-note {
+	margin-top: 8px;
+	font-size: 11px;
+	opacity: 0.6;
+	line-height: 1.4;
+}
+
 
 .obsidian-reader-active {
 	/* Translated paragraph inserted right after original (state=bilingual) */

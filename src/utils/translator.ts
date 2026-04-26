@@ -64,7 +64,48 @@ export const DEFAULT_TRANSLATOR_CONFIG: TranslatorConfig = {
 	timeoutMs: 60000,
 };
 
+// L1 in-memory cache (Map preserves insertion order → cheap LRU)
+// L2 chrome.storage.local backing for cross-session reuse (capped at MAX_ENTRIES)
 const cache = new Map<string, string>();
+const MAX_CACHE_ENTRIES = 2000;
+const CACHE_STORAGE_KEY = 'ot_translation_cache_v1';
+let storageLoaded = false;
+let writesSinceSync = 0;
+const WRITE_DEBOUNCE = 5;
+
+async function loadCacheFromStorage(): Promise<void> {
+	if (storageLoaded) return;
+	storageLoaded = true;
+	try {
+		const r = rt();
+		const data = await r.storage?.local?.get?.(CACHE_STORAGE_KEY);
+		const stored = (data && data[CACHE_STORAGE_KEY]) || {};
+		for (const [k, v] of Object.entries(stored)) {
+			if (typeof v === 'string') cache.set(k, v);
+		}
+		console.log(`[Translator] cache loaded ${cache.size} entries from storage`);
+	} catch (err) {
+		console.warn('[Translator] cache load failed:', err);
+	}
+}
+
+function scheduleCachePersist(force = false): void {
+	writesSinceSync++;
+	if (!force && writesSinceSync < WRITE_DEBOUNCE) return;
+	writesSinceSync = 0;
+	// Trim LRU (front of Map = oldest)
+	while (cache.size > MAX_CACHE_ENTRIES) {
+		const firstKey = cache.keys().next().value;
+		if (firstKey === undefined) break;
+		cache.delete(firstKey);
+	}
+	try {
+		const r = rt();
+		r.storage?.local?.set?.({ [CACHE_STORAGE_KEY]: Object.fromEntries(cache) });
+	} catch {
+		// non-extension context (e.g. dev/test) — silently no-op
+	}
+}
 
 async function sha256(input: string): Promise<string> {
 	const buf = new TextEncoder().encode(input);
@@ -166,6 +207,7 @@ export async function translateTexts(
 	texts: string[],
 	cfg: TranslatorConfig = DEFAULT_TRANSLATOR_CONFIG,
 ): Promise<string[]> {
+	await loadCacheFromStorage();
 	const out: string[] = new Array(texts.length).fill('');
 	const need: { idx: number; text: string }[] = [];
 
@@ -174,6 +216,9 @@ export async function translateTexts(
 		const key = await cacheKey(texts[i], cfg);
 		const hit = cache.get(key);
 		if (hit !== undefined) {
+			// Refresh LRU position (delete + reinsert)
+			cache.delete(key);
+			cache.set(key, hit);
 			out[i] = hit;
 		} else {
 			need.push({ idx: i, text: texts[i] });
@@ -193,7 +238,14 @@ export async function translateTexts(
 		}
 	}
 
+	scheduleCachePersist(true); // flush after batch
 	return out;
+}
+
+export function clearTranslationCacheStorage(): void {
+	cache.clear();
+	storageLoaded = false;
+	try { rt().storage?.local?.remove?.(CACHE_STORAGE_KEY); } catch {}
 }
 
 /**
@@ -314,4 +366,5 @@ export async function applyTranslationState(
 
 export function clearTranslationCache(): void {
 	cache.clear();
+	scheduleCachePersist(true);
 }

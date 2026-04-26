@@ -68,6 +68,12 @@ export interface ReaderSettings {
 	autoScroll: boolean;
 	highlightActiveLine: boolean;
 	customCss: string;
+	// Bilingual translator (Phase 1.5)
+	translatorEnabled: boolean;       // auto-translate when reader opens
+	translatorEndpoint: string;       // chat completions URL
+	translatorModel: string;
+	translatorTargetLang: string;     // human label, e.g. "繁體中文（台灣）"
+	translatorSystemPrompt: string;   // empty string → use built-in default
 }
 
 export interface Settings {

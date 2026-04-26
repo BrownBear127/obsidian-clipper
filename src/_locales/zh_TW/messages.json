@@ -1065,5 +1065,41 @@
 	},
 	"version": {
 		"message": "版本"
+	},
+	"translate": {
+		"message": "翻譯"
+	},
+	"translateBilingual": {
+		"message": "雙語（原文 + 譯文）"
+	},
+	"translateTargetOnly": {
+		"message": "僅顯示譯文"
+	},
+	"translateOff": {
+		"message": "關閉"
+	},
+	"translateSectionTitle": {
+		"message": "翻譯"
+	},
+	"translateAutoOn": {
+		"message": "閱讀器開啟時自動翻譯"
+	},
+	"translateEndpoint": {
+		"message": "端點"
+	},
+	"translateModel": {
+		"message": "模型"
+	},
+	"translateTargetLang": {
+		"message": "目標語言"
+	},
+	"translateSystemPrompt": {
+		"message": "系統提示（選填）"
+	},
+	"translateSystemPromptPlaceholder": {
+		"message": "留空使用內建預設 prompt。"
+	},
+	"translateSettingsNote": {
+		"message": "設定變更立即儲存。Toggle 翻譯：點擊 nav 列的 A 按鈕，或按 T。"
 	}
 }

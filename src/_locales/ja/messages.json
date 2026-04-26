@@ -1065,5 +1065,41 @@
 	},
 	"version": {
 		"message": "バージョン"
+	},
+	"translate": {
+		"message": "翻訳"
+	},
+	"translateBilingual": {
+		"message": "バイリンガル（原文 + 訳文）"
+	},
+	"translateTargetOnly": {
+		"message": "訳文のみ"
+	},
+	"translateOff": {
+		"message": "オフ"
+	},
+	"translateSectionTitle": {
+		"message": "翻訳"
+	},
+	"translateAutoOn": {
+		"message": "リーダー起動時に自動翻訳"
+	},
+	"translateEndpoint": {
+		"message": "エンドポイント"
+	},
+	"translateModel": {
+		"message": "モデル"
+	},
+	"translateTargetLang": {
+		"message": "対象言語"
+	},
+	"translateSystemPrompt": {
+		"message": "システムプロンプト（任意）"
+	},
+	"translateSystemPromptPlaceholder": {
+		"message": "空欄でデフォルトを使用。"
+	},
+	"translateSettingsNote": {
+		"message": "設定は自動保存。翻訳の切替：ナビの A ボタン、または T キー。"
 	}
 }

@@ -51,6 +51,13 @@ declare global {
 			return;
 		}
 
+		// If reader bilingual translate is on, refresh the save snapshot first
+		// so popup iframe (Add to Obsidian) reads the translated version.
+		try {
+			const hook = (window as any).__otReaderSyncSaveSnapshot;
+			if (typeof hook === 'function') hook();
+		} catch {}
+
 		await ensureHighlighterCSS();
 
 		const container = document.createElement('div');

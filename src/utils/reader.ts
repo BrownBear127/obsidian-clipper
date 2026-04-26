@@ -165,7 +165,12 @@ export class Reader {
 		pinPlayer: true,
 		autoScroll: true,
 		highlightActiveLine: true,
-		customCss: ''
+		customCss: '',
+		translatorEnabled: false,
+		translatorEndpoint: 'http://127.0.0.1:8843/v1/chat/completions',
+		translatorModel: 'qwen3-4b-translator',
+		translatorTargetLang: '繁體中文（台灣）',
+		translatorSystemPrompt: '',
 	};
 
 	private static async loadSettings(): Promise<void> {
@@ -661,6 +666,10 @@ export class Reader {
 		controlsContainer.appendChild(settingsBtn);
 
 		settingsBar.appendChild(controlsContainer);
+
+		// Translator settings panel (collapsible, sits below the settings controls)
+		const translatorPanel = this.buildTranslatorPanel(doc);
+		settingsBar.appendChild(translatorPanel);
 
 		doc.body.appendChild(settingsBar);
 		this.settingsBar = settingsBar;
@@ -2177,6 +2186,10 @@ export class Reader {
 			// Add reader classes and attributes
 			doc.documentElement.classList.add('obsidian-reader-active');
 
+			// Expose a save-snapshot hook for the content-script's toggleIframe path
+			// so the Add-to-Obsidian popup picks up bilingual transforms.
+			(window as any).__otReaderSyncSaveSnapshot = () => Reader.syncSaveSnapshot(doc);
+
 			// Load the highlighter stylesheet. On a live page (case 2), this
 			// goes through content.js's bridge. On reader.html (case 3), the
 			// local implementation injects the <link> tag directly.
@@ -2262,9 +2275,17 @@ export class Reader {
 
 			this.populateArticle(doc, main, article, { content, title, author, published, domain, wordCount, parseTime });
 
-			// Re-apply translation if user previously toggled it on for this session
-			if (this.translateState !== 'off') {
-				this.runTranslation(doc, this.translateState).catch(err => console.warn('Reader translate', err));
+			// Auto-trigger translation:
+			//  - if user previously toggled state on this session, OR
+			//  - if translatorEnabled setting is true (auto-on per page open)
+			let initialState: ReaderTranslateState = this.translateState;
+			if (initialState === 'off' && this.settings.translatorEnabled) {
+				initialState = 'bilingual';
+				this.translateState = initialState;
+				this.syncTranslateBtn();
+			}
+			if (initialState !== 'off') {
+				this.runTranslation(doc, initialState).catch(err => console.warn('Reader translate', err));
 			}
 
 			// Use the Defuddle-extracted title (article title only) instead of
@@ -2484,12 +2505,110 @@ export class Reader {
 		btn.classList.toggle('is-active', this.translateState !== 'off');
 		btn.setAttribute('data-state', this.translateState);
 		const labels: Record<ReaderTranslateState, string> = {
-			off: 'Translate',
-			bilingual: 'Bilingual (原文 + 繁中)',
-			target_only: '繁體中文 only',
+			off: getMessage('translate') || 'Translate',
+			bilingual: getMessage('translateBilingual') || 'Bilingual',
+			target_only: getMessage('translateTargetOnly') || 'Translation only',
 		};
 		btn.setAttribute('aria-label', labels[this.translateState]);
 		btn.setAttribute('title', `${labels[this.translateState]} (T)`);
+	}
+
+	/**
+	 * Render the translator config panel inside the reader settings overlay.
+	 * Lives below the typography/theme controls and is collapsed by default.
+	 */
+	private static buildTranslatorPanel(doc: Document): HTMLElement {
+		const panel = doc.createElement('details');
+		panel.className = 'obsidian-reader-translator-panel';
+		const summary = doc.createElement('summary');
+		summary.textContent = getMessage('translateSectionTitle') || 'Translation';
+		panel.appendChild(summary);
+
+		const grid = doc.createElement('div');
+		grid.className = 'obsidian-reader-translator-fields';
+		panel.appendChild(grid);
+
+		const persist = (() => {
+			let timer: ReturnType<typeof setTimeout> | null = null;
+			return () => {
+				if (timer) clearTimeout(timer);
+				timer = setTimeout(() => browser.storage.sync.set({ reader_settings: this.settings }).catch(() => {}), 350);
+			};
+		})();
+
+		const addRow = (
+			label: string,
+			id: keyof ReaderSettings,
+			type: 'text' | 'textarea' | 'checkbox' = 'text',
+			placeholder = '',
+		) => {
+			const row = doc.createElement('label');
+			row.className = `obsidian-reader-translator-row ot-row-${type}`;
+			const lab = doc.createElement('span');
+			lab.className = 'obsidian-reader-translator-label';
+			lab.textContent = label;
+			row.appendChild(lab);
+
+			let input: HTMLInputElement | HTMLTextAreaElement;
+			if (type === 'textarea') {
+				input = doc.createElement('textarea');
+				(input as HTMLTextAreaElement).rows = 4;
+				input.value = String(this.settings[id] ?? '');
+			} else if (type === 'checkbox') {
+				input = doc.createElement('input');
+				(input as HTMLInputElement).type = 'checkbox';
+				(input as HTMLInputElement).checked = !!this.settings[id];
+			} else {
+				input = doc.createElement('input');
+				(input as HTMLInputElement).type = 'text';
+				input.value = String(this.settings[id] ?? '');
+			}
+			input.className = 'obsidian-reader-translator-input';
+			if (placeholder) (input as HTMLInputElement).placeholder = placeholder;
+
+			input.addEventListener('input', () => {
+				const v = type === 'checkbox' ? (input as HTMLInputElement).checked : input.value;
+				(this.settings as any)[id] = v;
+				persist();
+			});
+			input.addEventListener('change', () => {
+				const v = type === 'checkbox' ? (input as HTMLInputElement).checked : input.value;
+				(this.settings as any)[id] = v;
+				persist();
+			});
+
+			row.appendChild(input);
+			grid.appendChild(row);
+		};
+
+		addRow(getMessage('translateAutoOn') || 'Auto-translate when reader opens', 'translatorEnabled', 'checkbox');
+		addRow(getMessage('translateEndpoint') || 'Endpoint', 'translatorEndpoint', 'text', 'http://127.0.0.1:8843/v1/chat/completions');
+		addRow(getMessage('translateModel') || 'Model', 'translatorModel', 'text', 'qwen3-4b-translator');
+		addRow(getMessage('translateTargetLang') || 'Target language', 'translatorTargetLang', 'text', '繁體中文（台灣）');
+		addRow(getMessage('translateSystemPrompt') || 'System prompt (optional)',
+			'translatorSystemPrompt', 'textarea',
+			getMessage('translateSystemPromptPlaceholder') || 'Leave blank to use the built-in default.');
+
+		const note = doc.createElement('div');
+		note.className = 'obsidian-reader-translator-note';
+		note.textContent = getMessage('translateSettingsNote')
+			|| 'Settings save automatically. Toggle translation: A button in nav, or press T.';
+		panel.appendChild(note);
+
+		return panel;
+	}
+
+	private static buildTranslatorConfig() {
+		// Pull from current reader settings; fall back to defaults exported by translator
+		const s = this.settings;
+		const cfg = { ...DEFAULT_TRANSLATOR_CONFIG };
+		if (s.translatorEndpoint) cfg.endpoint = s.translatorEndpoint;
+		if (s.translatorModel) cfg.model = s.translatorModel;
+		if (s.translatorTargetLang) cfg.targetLang = s.translatorTargetLang;
+		if (s.translatorSystemPrompt && s.translatorSystemPrompt.trim()) {
+			cfg.systemPrompt = s.translatorSystemPrompt;
+		}
+		return cfg;
 	}
 
 	private static async runTranslation(doc: Document, state: ReaderTranslateState) {
@@ -2511,9 +2630,12 @@ export class Reader {
 		this.translateBusy = true;
 		this.translateBtnEl?.classList.add('is-loading');
 		try {
-			await applyTranslationState(article, state, DEFAULT_TRANSLATOR_CONFIG, (done, total) => {
+			await applyTranslationState(article, state, this.buildTranslatorConfig(), (done, total) => {
 				if (done % 5 === 0 || done === total) console.log(`[Translator] progress ${done}/${total}`);
 			}, extraRoots);
+			// Sync snapshot so popup iframe Save (Add to Obsidian) reads the
+			// translated/bilingual version, not the original.
+			this.syncSaveSnapshot(doc);
 		} finally {
 			this.translateBusy = false;
 			this.translateBtnEl?.classList.remove('is-loading');
@@ -2847,20 +2969,29 @@ export class Reader {
 	 *
 	 * Mutates `doc` in place; caller should restore afterwards via reverseSaveTransform.
 	 */
-	private static applySaveTransform(doc: Document): { undo: () => void } {
-		if (this.translateState === 'off') return { undo: () => {} };
+	/**
+	 * Idempotent: write a save-friendly serialization into article's
+	 * data-original-html (which parseForClip prefers over live DOM). Safe to
+	 * call repeatedly — does not mutate live DOM at all. Used by:
+	 *   - reader-internal Save/Copy (reader-side dropdown)
+	 *   - Obsidian iframe popup save (via window global hook)
+	 */
+	static syncSaveSnapshot(doc: Document): void {
 		const article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;
-		if (!article) return { undo: () => {} };
+		if (!article) return;
 
-		// CRITICAL: parseForClip prefers `data-original-html` over live DOM.
-		// We must overwrite that attribute with our transformed serialization,
-		// then restore on undo.
-		const prevOriginalHtml = article.getAttribute('data-original-html');
-
-		const undos: Array<() => void> = [];
+		// Build a clone we can mutate without touching live DOM
+		const clone = article.cloneNode(true) as HTMLElement;
+		clone.querySelectorAll('span.timestamp').forEach(span => {
+			span.replaceWith(span.textContent || '');
+		});
 
 		if (this.translateState === 'bilingual') {
-			const originals = Array.from(article.querySelectorAll('[data-ot-original]')) as HTMLElement[];
+			// Wrap each original paragraph in a blockquote so saved markdown reads:
+			//   > 原文
+			//
+			//   繁中
+			const originals = Array.from(clone.querySelectorAll('[data-ot-original]')) as HTMLElement[];
 			for (const orig of originals) {
 				if (orig.parentElement?.classList.contains('ot-save-quote')) continue;
 				const bq = doc.createElement('blockquote');
@@ -2868,30 +2999,27 @@ export class Reader {
 				const parent = orig.parentNode;
 				parent?.insertBefore(bq, orig);
 				bq.appendChild(orig);
-				undos.push(() => {
-					parent?.insertBefore(orig, bq);
-					bq.remove();
-				});
 			}
 		}
-		// target_only: live DOM already has translated text; nothing to wrap.
+		// 'target_only' / 'off': clone already mirrors live DOM; nothing to wrap.
 
-		// Serialize current article state into data-original-html so parseForClip
-		// reads our transformed content
-		const clone = article.cloneNode(true) as Element;
-		clone.querySelectorAll('span.timestamp').forEach(span => {
-			span.replaceWith(span.textContent || '');
-		});
 		article.setAttribute('data-original-html', serializeChildren(clone));
+	}
 
+	/**
+	 * Legacy in-place transform retained for reader-internal Save/Copy paths
+	 * which still want a Mutation+undo cycle for clipboard text consistency.
+	 * Internally calls syncSaveSnapshot and returns a no-op undo.
+	 */
+	private static applySaveTransform(doc: Document): { undo: () => void } {
+		const article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;
+		if (!article) return { undo: () => {} };
+		const prev = article.getAttribute('data-original-html');
+		this.syncSaveSnapshot(doc);
 		return {
 			undo: () => {
-				undos.reverse().forEach(fn => fn());
-				if (prevOriginalHtml !== null) {
-					article.setAttribute('data-original-html', prevOriginalHtml);
-				} else {
-					article.removeAttribute('data-original-html');
-				}
+				if (prev !== null) article.setAttribute('data-original-html', prev);
+				else article.removeAttribute('data-original-html');
 			},
 		};
 	}
