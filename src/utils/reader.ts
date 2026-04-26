@@ -2208,22 +2208,26 @@ export class Reader {
 				const article = doc.querySelector('.obsidian-reader-content article') as HTMLElement | null;
 				if (!article) return;
 				const undos: Array<() => void> = [];
-				const originals = Array.from(article.querySelectorAll('[data-ot-original]')) as HTMLElement[];
-				for (const orig of originals) {
-					if (orig.tagName !== 'P' && orig.tagName !== 'BLOCKQUOTE') continue;
-					if (orig.closest('li, dt, dd, figcaption')) continue;
-					if (orig.parentElement?.classList.contains('ot-save-quote')) continue;
+				// Wrap the TRANSLATION (not the original) in <blockquote> so the
+				// saved markdown reads as `原文 \n\n > 譯文` — matching what the
+				// reader displays (original plain, translation as styled quote).
+				const translations = Array.from(
+					article.querySelectorAll('.ot-bilingual-translated')
+				) as HTMLElement[];
+				for (const trans of translations) {
+					if (trans.classList.contains('ot-inline')) continue; // list-item inline
+					if (trans.parentElement?.classList.contains('ot-save-quote')) continue;
 					const bq = doc.createElement('blockquote');
 					bq.className = 'ot-save-quote';
-					const parent = orig.parentNode;
-					parent?.insertBefore(bq, orig);
-					bq.appendChild(orig);
+					const parent = trans.parentNode;
+					parent?.insertBefore(bq, trans);
+					bq.appendChild(trans);
 					undos.push(() => {
-						parent?.insertBefore(orig, bq);
+						parent?.insertBefore(trans, bq);
 						bq.remove();
 					});
 				}
-				console.log(`[Translator] live wrapped ${undos.length} originals`);
+				console.log(`[Translator] live wrapped ${undos.length} translations`);
 				Reader.liveTransformUndo = () => {
 					undos.reverse().forEach(fn => fn());
 					Reader.liveTransformUndo = null;
@@ -3070,20 +3074,20 @@ export class Reader {
 		});
 
 		if (this.translateState === 'bilingual') {
-			// Only wrap "paragraph-like" blocks. Headings, list items, dt/dd,
-			// figcaption are kept inline (they live inside heavier structures
-			// where blockquote injection would break list/dl markdown).
-			const WRAPPABLE = new Set(['P', 'BLOCKQUOTE']);
-			const originals = Array.from(clone.querySelectorAll('[data-ot-original]')) as HTMLElement[];
-			for (const orig of originals) {
-				if (!WRAPPABLE.has(orig.tagName)) continue;
-				if (orig.parentElement?.classList.contains('ot-save-quote')) continue;
-				if (orig.closest('li, dt, dd, figcaption')) continue;
+			// Wrap the TRANSLATION (not the original) in <blockquote>. List-item
+			// inline translations (.ot-inline) are skipped — they live inside the
+			// original <li>, where blockquote injection would break list markdown.
+			const translations = Array.from(
+				clone.querySelectorAll('.ot-bilingual-translated')
+			) as HTMLElement[];
+			for (const trans of translations) {
+				if (trans.classList.contains('ot-inline')) continue;
+				if (trans.parentElement?.classList.contains('ot-save-quote')) continue;
 				const bq = doc.createElement('blockquote');
 				bq.className = 'ot-save-quote';
-				const parent = orig.parentNode;
-				parent?.insertBefore(bq, orig);
-				bq.appendChild(orig);
+				const parent = trans.parentNode;
+				parent?.insertBefore(bq, trans);
+				bq.appendChild(trans);
 			}
 		}
 
